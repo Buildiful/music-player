@@ -1,80 +1,89 @@
 # Music Player
 
-**Music Player by Buildiful®** is a free, open-source, ad-free music player for your own audio files. It runs in the browser, stores imported music and playlists on your device, and can be installed as a Progressive Web App (PWA).
-
-No account, backend, subscription, or audio upload is required.
+**Music Player by Buildiful®** is a free, open-source, ad-free player for music you already have. No account, streaming service, backend, or audio upload is required. The original audio files never leave your device.
 
 ## Features
 
-- Import local audio files (including multiple files), select a folder on supported browsers, or drag and drop files.
-- Keep an offline-capable library and create, rename, and delete playlists.
-- Add and remove songs from playlists without changing the original files.
-- Favorites, search, sorting, and an Up Next queue.
-- Play, pause, stop, previous, next, seek, volume, mute, shuffle, repeat all, and repeat one.
-- Lock-screen / hardware media controls where the browser implements the Media Session API.
-- Install as a desktop or mobile PWA; download a separate offline copy from Settings.
-- Optional, consent-based Google Analytics 4. Music contents and names are never sent.
+- **Reference-only library by default.** Add music files or folders, or drag and drop. New imports save song details and, where supported, file handles—not duplicate audio.
+- **Large-library friendly.** Clear scanning/import progress, success and failure counts, Stop action, and a song list that shows 150 rows at a time. You can search and sort the entire catalog, not just the rows currently displayed.
+- **Edit song info.** From any song's `•••` menu choose **Edit song info** to change title, artist, album, track number, year, or genre. Edits are stored in your player library, **not written to the original music file**. They survive relinking the same source file.
+- **MP3 tags.** Locally reads ID3v2.2, ID3v2.3, ID3v2.4 and ID3v1 tags where available; uses filenames as a fallback. Other formats may use filenames or `Artist - Title` naming.
+- **Playlists and playback.** Favorites, playlists, search, Up Next, pause/play/stop, previous/next, seek, shuffle, repeat, volume, and mute.
+- **Optional offline copies.** Use Settings → **Keep newly added music offline**, or keep an individual song/album/playlist offline from its menu. This stores a **second copy** of selected audio in this browser's IndexedDB so supported offline installations, including iPhone Home Screen apps, can reopen and play those tracks without reselecting them while the data remains available.
+- Installable PWA and standalone offline ZIP. Consent-based GA4 with no song or playlist content included in events.
 
-## Supported audio
+## How the library works
 
-Supports common audio file extensions: MP3, M4A, AAC, WAV, OGG/OGA, FLAC, OPUS, AIFF/AIF. **Actual playback depends on your browser's audio codecs and the file encoding.** Protected streaming-library downloads and DRM-restricted files are not supported. MP3 ID3 title, artist, and album tags are read locally when available; other files default to their filenames (artist can be derived from `Artist - Title.ext`).
+### Reference-only mode (the default)
 
-## How local storage works
+On supported Chromium desktop browsers, selecting originals yields file handles stored alongside the music catalog in IndexedDB. Chrome or Edge may ask you to allow file access again later. You must keep the originals accessible, including external drives. No audio is copied into browser storage.
 
-On import, the app **copies** each file into the device's browser storage (IndexedDB). The original file stays at its original location. These local copies make it possible to reopen playlists after a browser restart without requesting access to the original file again. They also take additional local storage space.
+Other browsers (including Safari on iPhone) can use a temporary reference during the current session. Song information and playlists remain in the browser's catalog, but **original files must be selected again after reopening** unless you saved optional offline copies. When matching files are selected again, the application reconnects them using filename, size, and modification time. No files are uploaded.
 
-Neither audio files nor playlists are sent to Buildiful's servers. Files are not hosted on GitHub Pages. Browser storage limits vary. If browser storage is unavailable, the player falls back to a temporary session (the app will warn you). Clearing website data, uninstalling the app, or browser storage eviction may remove imported copies and playlists. Keep your originals as your backup.
+Adding a folder on supported browsers scans subfolders. Large folders can take time. The scan and import are shown separately; you can stop either operation. The list uses a **Show more** button so a 10,000-song library does not render all 10,000 rows at once. Device/browser conditions still affect import time and the practical library size; a particular capacity is not guaranteed.
 
-The iOS Files picker supports selecting individual audio files; whole-folder selection and file formats depend on the browser and device. Files imported in Safari and in a separately installed Home Screen app may be stored in different browser containers. If needed, import the files into the installed app again.
+### Offline copies (optional)
 
-## Install the app
+Offline copies are independent of original file handles. You can:
 
-**Desktop:** On Chrome or Edge, visit the deployed site and use the browser's Install app option. On macOS Safari (version 17+), use File → Add to Dock. The installed app can launch in its own window and run offline after its shell has cached on that device. It is a browser-managed app, **not** a native `.app` or `.exe` binary.
+1. Turn on **Keep newly added music offline** in Settings *before importing* to copy only music you select from then on.
+2. Select **Keep available offline** from a song's `•••` menu.
+3. Select **Keep this album offline** from a song with an album name, or open a playlist and select **Keep offline**.
 
-**iPhone:** Open the deployed site in Safari, tap Share → Add to Home Screen, enable Open as Web App if offered, and tap Add. Launch the app once while online to populate its offline cache. Play music imported within the Home Screen app. Background/lock-screen playback is subject to iOS browser restrictions.
+Offline copies consume additional browser storage, approximately the same size as the selected source audio. They are intended to improve the iPhone experience, but are **not as durable as the original files**: the browser/OS may erase or evict its storage under some circumstances. Clearing website data, deleting the Home Screen app, or changing browsers can also erase the stored catalog and offline copies. **Always keep your original files elsewhere.** You can remove optional copies in Settings without modifying your originals. Local copies may be unavailable if storage is full or restricted; the importer reports these failures.
 
-**Downloaded offline copy:** In Settings, select **Download offline copy**, unzip `Music-Player-Offline.zip`, and open `index.html`. The web player UI works without GitHub Pages or a network connection. Browser security rules for local `file://` pages differ; local library persistence can be unavailable (temporary session in that case), and service-worker installation is not available from this copy. For the most reliable persistent offline library, use the installed PWA instead. The local-file copy never loads Google Analytics.
+**Important for iPhone:** Safari and an installed Home Screen PWA may have separate storage; import and save music from the version you intend to use. Open the installed app once while online for the offline app shell to be cached. On iOS, the original Files app file selection may still be required when adding new music. A native iPhone edition is not part of this release.
 
-Browser installation controls differ: the app's **Install app** button opens a native prompt if available, or shows platform-specific instructions otherwise. An `install_click` event means the user clicked that button; it does not prove installation. Browsers such as iOS Safari do not reliably report completed Home Screen installations to websites.
+### Prior library versions
 
-## Deploy on GitHub Pages
+The database name is unchanged. Catalogs, favorites, playlists, and old copied audio from earlier versions remain available after the upgrade. Earlier copied tracks are not deleted automatically; reselect their original files to migrate them to references. Settings reports remaining old copies and new offline copies. The original files are never modified or deleted, even when you remove a song from Music Player.
 
-1. Create a public GitHub repository and commit the **contents of this directory** to the repository root, including `.nojekyll`, `sw.js`, `manifest.webmanifest`, `assets/`, and `downloads/`.
-2. In repository Settings → Pages, set Build and deployment to **Deploy from a branch**, select `main` and `/ (root)`, then save.
-3. Open the resulting HTTPS site. Try adding music, installing the app, going offline, and reopening the installed app.
-4. If you upgrade the app shell later, update the cache version in `sw.js` so installed copies can refresh.
+## Platform guidance
 
-No build tool, package manager, external JavaScript dependency, or server API is required. For local testing (recommended for a PWA), run `python3 -m http.server 8000` in this directory and open `http://localhost:8000`. Service workers install on HTTPS or localhost; they cannot install on ordinary `file://` pages.
+| Platform | Source references after restart | Optional offline copies |
+| --- | --- | --- |
+| Chrome / Edge on Windows, macOS, Linux | Usually reusable, subject to browser permissions | Yes |
+| Chrome on Android | File picker/handle support depends on Chrome version and Android permissions; device test recommended | Yes, subject to quota |
+| Safari on macOS / Firefox | Typically reselect originals | Yes, subject to quota |
+| Safari / Home Screen on iPhone | Reselect originals | Yes, subject to quota and storage retention |
+| Standalone `file://` ZIP | Typically temporary references; no service worker | Session and browser-policy dependent |
 
-## Analytics and privacy
+Audio support: MP3, M4A, AAC, WAV, OGG/OGA, FLAC, OPUS, AIFF/AIF. Browser decoders determine which file encodings actually play; the app does not transcode or bypass DRM.
 
-`buildiful-analytics-consent.js` uses GA4 measurement ID `G-TG14RBXLTF`. It **never loads Google's tag until users opt in**. The app has a Privacy link and an Analytics settings control. The consent choice is stored locally; denying analytics does not affect the app. Analytics excludes query strings, song names, filenames, playlists, audio blobs, and listening history.
+## Install and deploy
 
-Allowlisted events: `music_import` (source + count), `music_remove`, `playlist_create`, `playlist_delete`, `playlist_add_track`, `playlist_remove_track`, `library_clear`, `install_click` (platform category), `install_prompt_accepted`, `app_installed` (when exposed by browser), and `offline_copy_download_click`. These are limited usage actions, **not** proof that a file was downloaded or an app was installed. GA4 may collect device data and set cookies after consent; see `privacy.html`.
+**GitHub Pages:** Publish the contents of this ZIP at your public repository root. Under Settings → Pages, choose Deploy from a branch → `main` → `/ (root)`. HTTPS is required for persistent file-handling APIs and service worker functionality. For local PWA QA, run `python3 -m http.server 8000` from this folder and open `http://localhost:8000`.
 
-No Google Analytics network requests should occur when consent is declined, unanswered, or when using the downloaded local-file copy. Do not include a second GA tag in `index.html`.
+**Home Screen:** On iPhone, open the published page in Safari and choose Share → Add to Home Screen. After adding, launch the Home Screen version and import music there if you want its offline copies to be associated with the installed app's storage.
 
-## Rights
+**Desktop installation:** In a supported desktop browser, use its Install app menu or button. A PWA is not a native `.app` or `.exe` installer.
 
-Only play music files that you have the rights or permission to play. This application does not provide or license any music.
+**Standalone ZIP:** Unzip `downloads/Music-Player-Offline.zip` and open `index.html` directly. The `file://` version cannot install a service worker or use the persistent Chromium file pickers, and Analytics is disabled. File linking and storage persistence may differ from the HTTPS version.
 
-## Project layout
+## Privacy, rights, and analytics
+
+Music and metadata are processed locally and are never uploaded to Buildiful or GitHub Pages. With permission, GA4 measures only a restricted set of feature actions and numeric counts, such as music imports, edits, optional offline copies saved or removed, playlist actions, and installation/download clicks. **It is not passed song titles, artist names, filenames, paths, playlists, or playback history.** Google Analytics is not loaded before opt-in. See `privacy.html`.
+
+Only play files you have the rights or permission to use. This software does not distribute or license music.
+
+## Repository contents
 
 ```text
-index.html                     App interface
-styles.css                     Responsive styles
-app.js                         Local library, playlists, audio player
-buildiful-analytics-consent.js Opt-in analytics module
+index.html                     Interface, dialogs, accessible controls
+styles.css                     Responsive appearance
+app.js                         IndexedDB catalog, song tags, imports, edit and playback
+buildiful-analytics-consent.js Optional analytics consent
 privacy.html                   Privacy notice
-manifest.webmanifest           Installable app metadata
-sw.js                          Offline app-shell cache
-assets/                        Official Buildiful® branding + PWA icons
-downloads/                     Standalone offline copy ZIP
-QA_CHECKLIST.md                Release and test checklist
-.gitignore / .nojekyll         Repository / GitHub Pages settings
-LICENSE                        MIT code license, excluding brand assets
+manifest.webmanifest           PWA manifest
+sw.js                          Offline app shell cache
+assets/                       Official Buildiful® assets
+  favicon.ico, favicon PNGs, apple-touch icon, PWA icons, white logo
+downloads/                     Separate standalone offline package
+QA_CHECKLIST.md                Manual verification checklist
+.gitignore / .nojekyll         GitHub Pages support
+LICENSE                        MIT code license (excluding branding assets)
 ```
 
 ## License
 
-The software is MIT licensed; see `LICENSE`. The Buildiful® name, trademark, logo, and supplied brand identity assets are **not** licensed for reuse as third-party branding. Forks may replace the brand assets with their own.
+The app's source code is MIT licensed (see `LICENSE`). Buildiful® trademarks and supplied brand assets are not licensed for other projects' branding. Replace them with your own in derivatives.

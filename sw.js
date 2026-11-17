@@ -1,5 +1,5 @@
-/* Offline app shell. Imported audio stays in local IndexedDB, never in this cache. */
-const CACHE = 'music-player-shell-v1-0-0';
+/* App shell only: audio imports and opt-in offline audio live outside the service worker cache. */
+const CACHE = 'music-player-shell-v1-2-0';
 const PREFIX = 'music-player-shell-';
 const APP_FILES = [
   './', './index.html', './styles.css', './app.js',
