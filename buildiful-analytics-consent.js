@@ -18,13 +18,15 @@
     'playlist_add_track','playlist_remove_track',
     'library_clear','install_click','install_prompt_accepted',
     'app_installed','offline_copy_download_click',
-    'song_info_edit','offline_music_save','offline_music_remove'
+    'song_info_edit','offline_music_save','offline_music_remove',
+    'library_relink','storage_manager_open','legacy_copy_remove'
   ]);
   function permittedParams(event, details) {
     const out = {tool_name:toolName};
-    if (['music_import','offline_music_save','offline_music_remove'].includes(event)) {
+    if (['music_import','offline_music_save','offline_music_remove','library_relink','legacy_copy_remove'].includes(event)) {
       if (Number.isInteger(details.file_count)) out.file_count = Math.min(10000,Math.max(0,details.file_count));
     }
+    if (event === 'library_relink' && ['manual','reviewed'].includes(details.source)) out.relink_source=details.source;
     if (event === 'music_import') {
       if (['files','folder','drop'].includes(details.source)) out.import_source = details.source;
     }

@@ -10,7 +10,9 @@
     stopped: true, volume: 0.8, persistence: 'device', installPrompt: null,
     toastTimer: null, dragDepth: 0, sessionFiles: new Map(), importing: false,
     importCancelled: false, importFailures: [], importSummary: null,
-    listLimit: 150, keepNewOffline: false, offlineTask: false
+    listLimit: 150, keepNewOffline: false, offlineTask: false,
+    storageGroup:'song', storageSearch:'', storageLimit:100, storageSelected:new Set(),
+    relinkCandidates:[], relinkLimit:100, relinkWorking:false, relinkCancelled:false, relinkSingleId:null
   };
   const analytics = (event, details = {}) => window.buildifulAnalytics?.track?.(event, details);
   const uid = () => (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -23,6 +25,21 @@
   const sortByName = (a, b) => a.name.localeCompare(b.name, undefined, {sensitivity:'base'});
   const tick = () => new Promise(resolve => setTimeout(resolve,0));
   const finger = file => `${file.name}|${file.size}|${file.lastModified}`;
+  // SHA-256 of two short samples + file size: useful for safe relinking when filenames change.
+  // This is a local-only lookup hint, not a full-file authenticity check.
+  async function audioSignature(file) {
+    if (!globalThis.crypto?.subtle || !Number.isFinite(file.size) || typeof file.slice !== 'function') return null;
+    const sample=32768;
+    try {
+      const first=new Uint8Array(await file.slice(0,Math.min(sample,file.size)).arrayBuffer());
+      const last=file.size>sample?new Uint8Array(await file.slice(Math.max(sample,file.size-sample)).arrayBuffer()):new Uint8Array();
+      const buffer=new Uint8Array(8+first.length+last.length);
+      new DataView(buffer.buffer).setBigUint64(0,BigInt(file.size),false);
+      buffer.set(first,8);buffer.set(last,8+first.length);
+      const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',buffer));
+      return [...digest].map(b=>b.toString(16).padStart(2,'0')).join('');
+    } catch (error) { console.warn('Audio signature unavailable:',error);return null; }
+  }
 
   // Metadata and file handles use IndexedDB. Audio copies are OPT-IN in a
   // separate store, not part of ordinary reference-only imports. Legacy audio
@@ -311,9 +328,10 @@
       (state.playlists.length ? '<div class="menu-caption">ADD TO PLAYLIST</div>'+
        state.playlists.slice().sort(sortByName).map(p => `<button data-action="toggle-playlist" data-target-id="${p.id}" class="${p.trackIds.includes(id) ? 'is-added':''}"><span>${escapeHtml(p.name)}</span>${p.trackIds.includes(id) ? icon('check') : icon('plus')}</button>`).join('') : '')+
       (playlist ? `<button data-action="remove-current">Remove from this playlist ${icon('x')}</button>` : '')+
-      `<div class="menu-caption">SONG</div><button data-action="edit">Edit song info ${icon('pencil')}</button>`+
+      `<div class="menu-caption">SONG</div><button data-action="edit">Edit song info ${icon('pencil')}</button><button data-action="relink">Relink file ${icon('folder')}</button>`+
       (t.offlineSaved ? `<button data-action="remove-offline">Remove offline copy ${icon('x')}</button>` : `<button data-action="save-offline">Keep available offline ${icon('download')}</button>`)+
       (t.album ? `<button data-action="save-album">Keep this album offline ${icon('download')}</button>` : '')+
+      (t.blob ? `<button data-action="remove-legacy" ${(!t.handle&&!state.sessionFiles.has(t.id)&&!t.offlineSaved)?'disabled title="Relink the original file first"':''}>Remove old stored copy ${icon('x')}</button>` : '')+
       `<div class="menu-caption">LIBRARY</div><button data-action="remove-library" class="warn">Remove song from library ${icon('x')}</button>`;
     dialogOpen($('trackDialog'));
   }
@@ -322,9 +340,11 @@
     const t = byId(id); if (!t) return;
     if (action === 'favorite') { await setFavorite(id); $('trackDialog').close(); return; }
     if (action === 'edit') { $('trackDialog').close(); openEditDialog(id); return; }
+    if (action === 'relink') { $('trackDialog').close(); await pickSingleRelink(id); return; }
     if (action === 'save-offline') { $('trackDialog').close(); await saveForOffline([t]); return; }
     if (action === 'remove-offline') { $('trackDialog').close(); await removeOffline([t]); return; }
     if (action === 'save-album') { $('trackDialog').close(); await saveForOffline(state.tracks.filter(x=>x.album && x.album===t.album));return; }
+    if (action === 'remove-legacy') { $('trackDialog').close(); await removeLegacyCopy(t); return; }
     if (action === 'toggle-playlist') {
       const p = byPlaylistId(button.dataset.targetId); if (!p) return;
       const already = p.trackIds.includes(id);
@@ -435,6 +455,18 @@
     }
     renderAll();toast(`${removed} offline ${removed===1?'copy':'copies'} removed.`);
     analytics('offline_music_remove',{file_count:removed});
+  }
+  async function removeLegacyCopy(track){
+    if(!track.blob)return;
+    const hasReference=Boolean(track.handle||state.sessionFiles.has(track.id));
+    if(!hasReference&&!track.offlineSaved){toast('Relink the original file before removing this old copy.');return;}
+    if(!confirm(`Remove the old stored copy of “${track.title}”? The original file is not affected. Confirm you can still access the linked original or saved offline version.`))return;
+    const update={...track};delete update.blob;
+    try{
+      await store.putTrack(update);
+      delete track.blob;
+      renderAll();toast('Old stored copy removed.');analytics('legacy_copy_remove',{file_count:1});
+    }catch(error){console.warn('Old-copy removal error:',error);toast('Could not remove the old copy.');}
   }
   function openPlaylistDialog(id = null) {
     state.editingPlaylistId = id;
@@ -554,19 +586,21 @@
             duplicates++;
           } else {
             const tags=await id3Metadata(file);
+            const signature=await audioSignature(file);
             const derived=basicFilename(file);
             const t=old?{...old}:{
               id:uid(),filename:file.name,title:tags.title||derived.title||file.name,
               artist:tags.artist||derived.artist||'Unknown artist',album:tags.album||'',
               genre:tags.genre||'',year:tags.year||'',trackNumber:tags.trackNumber||'',
               size:file.size,modified:file.lastModified,addedAt:Date.now()+idx,
-              duration:0,favorite:false
+              duration:0,favorite:false,signature
             };
             // Preserve intentional edits. On reconnect, fill missing metadata
             // from existing tags without overwriting a user-edited value.
             if(old) for (const key of ['title','artist','album','genre','year','trackNumber']) {
               if(!t.manualEdits?.[key] && tags[key] && (!t[key] || (key==='artist'&&t[key]==='Unknown artist'))) t[key]=tags[key];
             }
+            if(signature)t.signature=signature;
             delete t.blob;delete t.handle;
             if(entry.handle)t.handle=entry.handle;
             try {await store.putTrack(t);}
@@ -626,11 +660,11 @@
     await importEntries(candidateFiles(files).map(file=>({file})),source);
   }
   function handleEntries(handles){return handles.filter(h=>h?.kind==='file').map(handle=>({handle}));}
-  async function collectFolder(dir,limit=100000){
+  async function collectFolder(dir,limit=100000,cancelled=()=>state.importCancelled){
     const handles=[];
     async function walk(folder){
       for await(const entry of folder.values()){
-        if(state.importCancelled)break;
+        if(cancelled())break;
         if(entry.kind==='directory') await walk(entry);
         else if(supported.test(entry.name))handles.push(entry);
         if(handles.length>limit)throw new Error('Folder contains too many files. Select smaller folders.');
@@ -693,7 +727,7 @@
         `Browser storage can be cleared or evicted; your original files are never changed.`;
     $('offlineModeToggle').checked=state.keepNewOffline;
     $('offlineModeToggle').disabled=!store.db;
-    $('clearOfflineBtn').disabled=!offline.length;
+    // The Storage Manager offers targeted removal, instead of all-or-nothing cleanup.
   }
   async function clearLibrary() {
     if (!confirm('Clear every imported song and playlist from this Music Player? Original files will remain untouched.')) return;
@@ -710,9 +744,13 @@
     analytics('install_click',{platform:/iPad|iPhone|iPod/.test(navigator.userAgent)?'ios':'desktop_or_other'});
     if (state.installPrompt) {
       const prompt = state.installPrompt; state.installPrompt = null;
-      await prompt.prompt();
-      try { const choice = await prompt.userChoice; if (choice?.outcome === 'accepted') analytics('install_prompt_accepted'); }
-      catch {} return;
+      try {
+        await prompt.prompt();
+        const choice = await prompt.userChoice;
+        if (choice?.outcome === 'accepted') analytics('install_prompt_accepted');
+        return;
+      } catch (error) { console.warn('Native install prompt unavailable:',error); }
+      // The browser may already have displayed its own banner; show instructions. 
     }
     $('installInstructions').textContent = installInstructions(); dialogOpen($('installDialog'));
   }
@@ -779,18 +817,22 @@
       if(state.keepNewOffline){try{await navigator.storage?.persist?.();}catch{}}
       toast(state.keepNewOffline?'Newly added songs will also be saved offline.':'Newly added songs will use references only.');
     };
-    $('clearOfflineBtn').onclick=async()=>{await removeOffline(state.tracks);updateStorage();};
+    $('manageStorageBtn').onclick=()=>openStorageManager();
+    $('storageBtn').onclick=()=>{openStorageManager();closeSidebar();};
+    $('relinkBtn').onclick=()=>{openRelinkDialog();closeSidebar();};
     $('cancelImportBtn').onclick=()=>{state.importCancelled=true;$('importDetail').textContent='Stopping after the current file…';};
     $('dismissImportBtn').onclick=()=>{$('importStatus').hidden=true;};
     $('clearLibraryBtn').onclick=clearLibrary;
     $('downloadOfflineBtn').onclick=()=>{analytics('offline_copy_download_click');const a=document.createElement('a');a.href='./downloads/Music-Player-Offline.zip';a.download='Music-Player-Offline.zip';document.body.append(a);a.click();a.remove();};
     $('analyticsSettingsBtn').onclick=()=>window.buildifulAnalytics?.openSettings?.();
+    initLibraryManagementEvents();
     document.addEventListener('keydown', e => {
       const target=e.target;
       if (e.key === 'Escape') closeSidebar();
       if (e.code === 'Space' && !e.repeat && !e.altKey && !e.metaKey && !e.ctrlKey && !['INPUT','TEXTAREA','SELECT','BUTTON'].includes(target.tagName) && !document.querySelector('dialog[open]')) { e.preventDefault(); togglePlay(); }
     });
-    window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();state.installPrompt=e;});
+    // Preserve the browser's native install UI; the in-app Install button can also prompt.
+    window.addEventListener('beforeinstallprompt',e=>{state.installPrompt=e;});
     window.addEventListener('appinstalled',()=>{state.installPrompt=null;analytics('app_installed');toast('Music Player installed.');});
     document.addEventListener('dragenter',e=>{if (!e.dataTransfer?.types?.includes('Files')) return; e.preventDefault();state.dragDepth++;$('dropOverlay').hidden=false;});
     document.addEventListener('dragover',e=>{if (e.dataTransfer?.types?.includes('Files')) e.preventDefault();});
@@ -819,6 +861,272 @@
     });
     window.addEventListener('pagehide',()=>{});
   }
+  // --- Storage manager: only browser copies are removable; never touch source music. ---
+  const offlineTracks=()=>state.tracks.filter(t=>t.offlineSaved);
+  const storedBytes=tracks=>tracks.reduce((sum,t)=>sum+(Number(t.size)||0),0);
+  function storageEntries(){
+    const tracks=offlineTracks();
+    if(state.storageGroup==='song')return tracks.map(t=>({key:t.id,title:t.title,subtitle:t.artist||'Unknown artist',ids:[t.id],bytes:t.size||0}));
+    const groups=new Map();
+    const append=(key,title,id)=>{
+      if(!groups.has(key))groups.set(key,{key,title,ids:new Set()});
+      groups.get(key).ids.add(id);
+    };
+    if(state.storageGroup==='album')for(const t of tracks)append('album:'+(t.album||'Unknown album'),t.album||'Unknown album',t.id);
+    else {
+      const inPlaylist=new Set();
+      for(const p of state.playlists){
+        const ids=new Set(p.trackIds);
+        for(const t of tracks)if(ids.has(t.id)){append('playlist:'+p.id,p.name,t.id);inPlaylist.add(t.id);}
+      }
+      for(const t of tracks)if(!inPlaylist.has(t.id))append('playlist:none','Not in a playlist',t.id);
+    }
+    return [...groups.values()].map(g=>({key:g.key,title:g.title,ids:[...g.ids],subtitle:`${g.ids.size} song${g.ids.size===1?'':'s'}`,bytes:storedBytes([...g.ids].map(byId).filter(Boolean))}));
+  }
+  function filteredStorageEntries(){
+    const query=state.storageSearch.trim().toLocaleLowerCase();
+    return storageEntries().filter(e=>!query||`${e.title} ${e.subtitle||''}`.toLocaleLowerCase().includes(query)).sort((a,b)=>a.title.localeCompare(b.title,undefined,{sensitivity:'base'}));
+  }
+  function renderStorageManager(){
+    const saved=offlineTracks();
+    const legacy=state.tracks.filter(t=>t.blob);
+    const bytes=storedBytes(saved)+storedBytes(legacy);
+    $('storageManagerTotals').textContent=`${saved.length.toLocaleString()} offline copies · ~${shortSize(bytes)}`;
+    const entryList=filteredStorageEntries(), shown=entryList.slice(0,state.storageLimit);
+    const available=new Set(saved.map(t=>t.id));
+    for(const id of [...state.storageSelected])if(!available.has(id))state.storageSelected.delete(id);
+    $('storageEntryList').innerHTML=shown.map((entry,i)=>{
+      const checked=entry.ids.every(id=>state.storageSelected.has(id));
+      return `<div class="manager-entry"><label><input type="checkbox" data-storage-key="${i}" ${checked?'checked':''}><span class="entry-main"><strong>${escapeHtml(entry.title)}</strong><small>${escapeHtml(entry.subtitle||'Saved offline')}</small></span></label><span class="entry-size">${shortSize(entry.bytes)}</span></div>`;
+    }).join('')||'<p class="manager-notice">No offline copies match this view.</p>';
+    $('storageMoreBtn').hidden=entryList.length<=shown.length;
+    $('storageMoreBtn').textContent=`Show more (${Math.max(0,entryList.length-shown.length).toLocaleString()} remaining)`;
+    $('storageSelectionText').textContent=`${state.storageSelected.size.toLocaleString()} selected · ${shortSize(storedBytes([...state.storageSelected].map(byId).filter(Boolean)))}`;
+    $('storageRemoveBtn').disabled=state.storageSelected.size===0;
+    $('storageSelectShownBtn').disabled=!shown.length;
+    $('storageLegacyNotice').hidden=!legacy.length;
+    $('storageLegacyNotice').textContent=legacy.length?`${legacy.length} legacy audio ${legacy.length===1?'copy is':'copies are'} kept separately for safety. Relink the original files, then use the song’s ••• menu to safely remove these older copies. Original files are never deleted.`:'';
+  }
+  async function openStorageManager(){
+    if($('settingsDialog').open)$('settingsDialog').close();
+    state.storageLimit=100;state.storageSelected.clear();state.storageSearch='';$('storageSearch').value='';
+    dialogOpen($('storageDialog'));renderStorageManager();analytics('storage_manager_open');
+    $('storageQuotaText').textContent='Checking available browser storage…';
+    try{
+      const estimate=await navigator.storage?.estimate?.();
+      $('storageQuotaText').textContent=estimate?.quota?`Origin usage ${shortSize(estimate.usage||0)} / browser quota ${shortSize(estimate.quota)} (approx.)`:'Browser storage allowance varies by device';
+    }catch{$('storageQuotaText').textContent='Browser storage allowance varies by device';}
+  }
+  async function removeSelectedOffline(){
+    const targets=[...state.storageSelected].map(byId).filter(t=>t?.offlineSaved);
+    if(!targets.length)return;
+    if(!confirm(`Remove ${targets.length} offline ${targets.length===1?'copy':'copies'} (~${shortSize(storedBytes(targets))}) from this browser? Your original music files and playlists will remain.`))return;
+    const button=$('storageRemoveBtn');button.disabled=true;
+    let removed=0;const failures=[];
+    for(const t of targets){
+      try{
+        // Flip the metadata flag first; if deleting the blob fails, restore the flag.
+        await store.putTrack({...t,offlineSaved:false});
+        try{await store.deleteOffline(t.id);}catch(e){await store.putTrack(t);throw e;}
+        t.offlineSaved=false;state.storageSelected.delete(t.id);removed++;
+      }catch(error){failures.push(t.title);console.warn('Offline removal failed',error);}
+    }
+    renderAll();renderStorageManager();
+    toast(`${removed} offline ${removed===1?'copy':'copies'} removed${failures.length?` · ${failures.length} failed`:''}.`);
+    analytics('offline_music_remove',{file_count:removed});
+  }
+
+  // --- Library relink: create reversible suggestions, never silently substitute files. ---
+  function openRelinkDialog(){
+    state.relinkLimit=100;state.relinkCandidates=[];state.relinkSingleId=null;
+    $('relinkSummary').textContent='Choose a folder or files to locate moved or renamed tracks. For uncertain matches, use a song’s ••• menu → Relink file.';
+    $('relinkMatchList').innerHTML='';$('relinkApplyBtn').disabled=true;
+    dialogOpen($('relinkDialog'));
+  }
+  async function writeRelink(track, entry, explicit=false){
+    const file=entry.file||await entry.handle.getFile();
+    if(!supported.test(file.name))throw new Error('Not a supported audio file.');
+    if(explicit && !confirm(`Reconnect “${track.title}” to “${file.name}”? Your edited song details and playlists will be kept.`))return false;
+    const previous={...track};
+    const signature=await audioSignature(file);
+    const updated={...track,filename:file.name,size:file.size,modified:file.lastModified,signature:signature||track.signature};
+    if(entry.handle)updated.handle=entry.handle;
+    else delete updated.handle; // Safari: temporary File for this session only.
+    try{await store.putTrack(updated);}
+    catch(error){
+      if(!entry.handle||!['DataCloneError','NotSupportedError'].includes(error.name))throw error;
+      delete updated.handle;await store.putTrack(updated);
+    }
+    if(state.currentId===track.id)resetAudio();
+    Object.assign(track,updated);
+    if(!updated.handle)delete track.handle;
+    state.sessionFiles.set(track.id,file);
+    return true;
+  }
+  async function pickSingleRelink(id){
+    if(state.importing||state.relinkWorking){toast('Finish the current task first.');return;}
+    if(window.showOpenFilePicker){
+      try{
+        const handles=await window.showOpenFilePicker({multiple:false,types:[{description:'Music files',accept:{'audio/mpeg':['.mp3'],'audio/mp4':['.m4a'],'audio/wav':['.wav'],'audio/flac':['.flac'],'audio/ogg':['.ogg','.oga','.opus']}}]});
+        if(handles[0]){await singleRelinkEntry(id,{handle:handles[0]});return;}
+      }catch(error){if(error.name==='AbortError')return;console.warn('File picker fallback:',error);}
+    }
+    state.relinkSingleId=id;$('relinkSingleInput').click();
+  }
+  async function singleRelinkEntry(id,entry){
+    const track=byId(id);if(!track)return;
+    try{if(await writeRelink(track,entry,true)){renderAll();toast('Song reconnected.');analytics('library_relink',{file_count:1,source:'manual'});}}
+    catch(error){console.warn('Could not relink song:',error);toast(error?.message||'Could not access file.');}
+  }
+  function buildRelinkIndex(){
+    const index={exact:new Map(), nameSize:new Map(), sizeDate:new Map(), signatures:new Map(), sizes:new Set()};
+    const add=(map,key,track)=>{if(!map.has(key))map.set(key,[]);map.get(key).push(track);};
+    for(const t of state.tracks){
+      index.sizes.add(t.size);
+      add(index.exact,`${t.filename}|${t.size}|${t.modified}`,t);
+      add(index.nameSize,`${t.filename}|${t.size}`,t);
+      add(index.sizeDate,`${t.size}|${t.modified}`,t);
+      if(t.signature)add(index.signatures,`${t.size}|${t.signature}`,t);
+    }
+    return index;
+  }
+  function matchRelinkFile(file,signature,index){
+    const valid=tracks=>tracks.filter(t=>!signature||!t.signature||t.signature===signature);
+    const strategies=[
+      ['filename, size & date',valid(index.exact.get(finger(file))||[])],
+      ...(signature?[['audio signature',index.signatures.get(`${file.size}|${signature}`)||[]]]:[]),
+      ['filename & size',valid(index.nameSize.get(`${file.name}|${file.size}`)||[])],
+      ['size & date',valid(index.sizeDate.get(`${file.size}|${file.lastModified}`)||[])]
+    ];
+    for(const [method,found] of strategies)if(found.length)return {ids:found.map(t=>t.id),method};
+    return {ids:[],method:'No confident match'};
+  }
+  async function scanRelink(entries){
+    if(state.relinkWorking||state.importing){toast('Finish the current task first.');return;}
+    const candidates=entries.filter(e=>e.handle?supported.test(e.handle.name):supported.test(e.file?.name));
+    if(!candidates.length){toast('Choose MP3 or another supported audio file.');return;}
+    state.relinkWorking=true;state.relinkCancelled=false;state.relinkCandidates=[];
+    $('relinkStopBtn').hidden=false;$('relinkApplyBtn').disabled=true;
+    $('relinkProgress').hidden=false;$('relinkProgress').max=candidates.length;$('relinkProgress').value=0;
+    const index=buildRelinkIndex();let errors=0;
+    try{
+      for(let i=0;i<candidates.length;i++){
+        if(state.relinkCancelled)break;
+        const entry=candidates[i];
+        try{
+          const file=entry.file||await entry.handle.getFile();
+          // Skip hashing when no catalog song has the same size.
+          const signature=index.sizes.has(file.size)?await audioSignature(file):null;
+          const matched=matchRelinkFile(file,signature,index);
+          state.relinkCandidates.push({entry,file,ids:matched.ids,method:matched.method,selectedId:matched.ids.length===1?matched.ids[0]:null});
+        }catch(error){errors++;console.warn('Relink scan error:',error);}
+        if(i%12===0||i===candidates.length-1){
+          $('relinkProgress').value=i+1;
+          $('relinkSummary').textContent=`Scanning ${i+1} / ${candidates.length} · ${errors} unreadable`;
+          await tick();
+        }
+      }
+      // Avoid mapping two different chosen files to a single track automatically.
+      const seen=new Map();
+      for(const c of state.relinkCandidates)if(c.selectedId)seen.set(c.selectedId,(seen.get(c.selectedId)||0)+1);
+      for(const c of state.relinkCandidates)if(c.selectedId&&seen.get(c.selectedId)>1){c.ids=[c.selectedId];c.selectedId=null;c.method='Duplicate candidate: choose one file';}
+      renderRelinkCandidates();
+    }finally{state.relinkWorking=false;$('relinkStopBtn').hidden=true;renderRelinkCandidates();}
+  }
+  function renderRelinkCandidates(){
+    const items=state.relinkCandidates;
+    const clear=items.filter(c=>c.selectedId).length;
+    const ambiguous=items.filter(c=>!c.selectedId&&c.ids.length).length;
+    const unmatched=items.filter(c=>!c.ids.length).length;
+    $('relinkSummary').textContent=`${clear} selected match${clear===1?'':'es'} · ${ambiguous} need review · ${unmatched} unmatched. Unmatched songs can be reconnected from their ••• menu.`;
+    const shown=items.slice(0,state.relinkLimit);
+    $('relinkMatchList').innerHTML=shown.map((c,i)=>{
+      const options=c.ids.map(id=>`<option value="${escapeHtml(id)}" ${id===c.selectedId?'selected':''}>${escapeHtml(byId(id)?.title||'Unknown song')} — ${escapeHtml(byId(id)?.artist||'Unknown artist')}</option>`).join('');
+      return `<div class="manager-entry"><div class="entry-main"><strong>${escapeHtml(c.file.name)}</strong><small>${escapeHtml(c.method)} · ${c.ids.length?`${c.ids.length} candidate${c.ids.length===1?'':'s'}`:'Not linked'}</small></div>${c.ids.length?`<select class="manager-choice" data-relink-index="${i}" aria-label="Matching song for ${escapeHtml(c.file.name)}"><option value="">Do not relink</option>${options}</select>`:'<span class="entry-error">No match</span>'}</div>`;
+    }).join('')||'<p class="manager-notice">No matches to review.</p>';
+    $('relinkMoreBtn').hidden=items.length<=shown.length;
+    $('relinkMoreBtn').textContent=`Show more (${Math.max(0,items.length-shown.length).toLocaleString()} remaining)`;
+    $('relinkApplyBtn').disabled=!items.some(c=>c.selectedId)||state.relinkWorking;
+    $('relinkApplyBtn').textContent=`Apply ${items.filter(c=>c.selectedId).length} reviewed matches`;
+  }
+  async function applyRelinkCandidates(){
+    if(state.relinkWorking)return;
+    const selected=state.relinkCandidates.filter(c=>c.selectedId);
+    if(!selected.length)return;
+    const ids=selected.map(c=>c.selectedId);
+    if(new Set(ids).size!==ids.length){toast('Two files target the same song. Choose one for each.');return;}
+    if(!confirm(`Reconnect ${selected.length} songs using the reviewed files? Song edits, favorites and playlists will remain.`))return;
+    state.relinkWorking=true;state.relinkCancelled=false;
+    $('relinkStopBtn').hidden=false;$('relinkApplyBtn').disabled=true;
+    $('relinkProgress').hidden=false;$('relinkProgress').max=selected.length;$('relinkProgress').value=0;
+    let linked=0;const failed=[];
+    try{
+      for(let i=0;i<selected.length;i++){
+        if(state.relinkCancelled)break;
+        const c=selected[i],t=byId(c.selectedId);
+        try{if(t&&await writeRelink(t,c.entry))linked++;}catch(error){failed.push(c.file.name);console.warn('Relink write failure:',error);}
+        if(i%12===0||i===selected.length-1){$('relinkProgress').value=i+1;$('relinkSummary').textContent=`Reconnecting ${i+1}/${selected.length} · ${linked} complete`;await tick();}
+      }
+    }finally{state.relinkWorking=false;$('relinkStopBtn').hidden=true;}
+    state.relinkCandidates=state.relinkCandidates.filter(c=>!selected.includes(c));
+    renderAll();renderRelinkCandidates();
+    toast(`${linked} songs reconnected${failed.length?` · ${failed.length} failed`:''}.`);
+    if(linked)analytics('library_relink',{file_count:linked,source:'reviewed'});
+  }
+  async function pickRelinkFiles(){
+    if(state.relinkWorking)return;
+    if(window.showOpenFilePicker){
+      try{
+        const handles=await window.showOpenFilePicker({multiple:true,types:[{description:'Music files',accept:{'audio/mpeg':['.mp3'],'audio/mp4':['.m4a'],'audio/wav':['.wav'],'audio/ogg':['.ogg','.oga','.opus'],'audio/flac':['.flac']}}]});
+        await scanRelink(handleEntries(handles));return;
+      }catch(error){if(error.name==='AbortError')return;console.warn('Relink file picker fallback:',error);}
+    }
+    $('relinkFilesInput').click();
+  }
+  async function pickRelinkFolder(){
+    if(state.relinkWorking)return;
+    if(window.showDirectoryPicker){
+      try{
+        const folder=await window.showDirectoryPicker({mode:'read'});
+        state.relinkWorking=true;state.relinkCancelled=false;
+        $('relinkSummary').textContent='Finding files in this folder…';$('relinkStopBtn').hidden=false;
+        const handles=await collectFolder(folder,100000,()=>state.relinkCancelled);
+        state.relinkWorking=false;$('relinkStopBtn').hidden=true;
+        if(!state.relinkCancelled)await scanRelink(handleEntries(handles));
+        else $('relinkSummary').textContent='Folder scan stopped.';
+        return;
+      }catch(error){state.relinkWorking=false;$('relinkStopBtn').hidden=true;if(error.name==='AbortError')return;console.warn('Folder picker fallback:',error);}
+    }
+    $('relinkFolderInput').click();
+  }
+  function initLibraryManagementEvents(){
+    $('storageGroup').onchange=e=>{state.storageGroup=e.target.value;state.storageLimit=100;renderStorageManager();};
+    $('storageSearch').oninput=e=>{state.storageSearch=e.target.value;state.storageLimit=100;renderStorageManager();};
+    $('storageEntryList').onchange=e=>{
+      const el=e.target.closest('[data-storage-key]');if(!el)return;
+      const row=filteredStorageEntries().slice(0,state.storageLimit)[Number(el.dataset.storageKey)];if(!row)return;
+      for(const id of row.ids)el.checked?state.storageSelected.add(id):state.storageSelected.delete(id);
+      renderStorageManager();
+    };
+    $('storageSelectShownBtn').onclick=()=>{for(const row of filteredStorageEntries().slice(0,state.storageLimit))for(const id of row.ids)state.storageSelected.add(id);renderStorageManager();};
+    $('storageClearSelectionBtn').onclick=()=>{state.storageSelected.clear();renderStorageManager();};
+    $('storageMoreBtn').onclick=()=>{state.storageLimit+=100;renderStorageManager();};
+    $('storageRemoveBtn').onclick=removeSelectedOffline;
+    $('relinkPickFilesBtn').onclick=pickRelinkFiles;
+    $('relinkPickFolderBtn').onclick=pickRelinkFolder;
+    $('relinkStopBtn').onclick=()=>{state.relinkCancelled=true;$('relinkSummary').textContent='Stopping after the current file…';};
+    $('relinkMatchList').onchange=e=>{
+      const select=e.target.closest('[data-relink-index]');if(!select)return;
+      const item=state.relinkCandidates[Number(select.dataset.relinkIndex)];
+      if(item){item.selectedId=select.value||null;renderRelinkCandidates();}
+    };
+    $('relinkMoreBtn').onclick=()=>{state.relinkLimit+=100;renderRelinkCandidates();};
+    $('relinkApplyBtn').onclick=applyRelinkCandidates;
+    $('relinkFilesInput').onchange=async e=>{const files=[...e.target.files];e.target.value='';await scanRelink(candidateFiles(files).map(file=>({file})));};
+    $('relinkFolderInput').onchange=async e=>{const files=[...e.target.files];e.target.value='';await scanRelink(candidateFiles(files).map(file=>({file})));};
+    $('relinkSingleInput').onchange=async e=>{const file=e.target.files[0];e.target.value='';const id=state.relinkSingleId;state.relinkSingleId=null;if(file&&id)await singleRelinkEntry(id,{file});};
+  }
+
   async function init() {
     store = await LibraryStore.create();
     if (!store.db) state.persistence = 'session';

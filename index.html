@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#0e2238">
   <meta name="color-scheme" content="dark">
   <meta name="description" content="Music Player by Buildiful® — a simple, private music library. Your files stay on your device. Listen offline.">
-  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Music Player">
   <title>Music Player by Buildiful®</title>
@@ -69,6 +69,8 @@
         <div class="sidebar-spacer"></div>
         <div class="sidebar-bottom">
           <button class="sidebar-action" id="installBtn"><svg><use href="#i-download"/></svg> Install app</button>
+          <button class="sidebar-action" id="relinkBtn"><svg><use href="#i-folder"/></svg> Library relink</button>
+          <button class="sidebar-action" id="storageBtn"><svg><use href="#i-download"/></svg> Storage manager</button>
           <button class="sidebar-action" id="settingsBtn"><svg><use href="#i-settings"/></svg> Settings</button>
         </div>
       </aside>
@@ -110,7 +112,7 @@
               <button class="btn btn-primary" id="emptyAddBtn"><svg><use href="#i-plus"/></svg> Add music</button>
             </div>
           </section>
-          <footer class="app-footer"><span>Built by Buildiful® · Version 1.2.0</span><span class="footer-links"><a href="./privacy.html">Privacy</a><button id="analyticsSettingsBtn">Analytics settings</button></span><span>Play only music you have the rights to use.</span></footer>
+          <footer class="app-footer"><span>Built by Buildiful® · Version 1.3.0</span><span class="footer-links"><a href="./privacy.html">Privacy</a><button id="analyticsSettingsBtn">Analytics settings</button></span><span>Be sure to only play music you have the rights to use.</span></footer>
         </div>
       </main>
       <aside class="queue-panel" aria-label="Up next">
@@ -129,11 +131,35 @@
   <div class="drop-overlay" id="dropOverlay" hidden><svg><use href="#i-plus"/></svg><strong>Drop music to add</strong></div>
   <input type="file" id="filesInput" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.oga,.flac,.opus,.aiff,.aif" multiple hidden>
   <input type="file" id="folderInput" webkitdirectory directory multiple hidden>
+  <input type="file" id="relinkFilesInput" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.oga,.flac,.opus,.aiff,.aif" multiple hidden>
+  <input type="file" id="relinkFolderInput" webkitdirectory directory multiple hidden>
+  <input type="file" id="relinkSingleInput" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.oga,.flac,.opus,.aiff,.aif" hidden>
   <audio id="audioEl" preload="metadata"></audio>
   <dialog id="playlistDialog" class="modal"><form method="dialog" id="playlistForm"><div class="modal-top"><h2 id="playlistDialogTitle">New playlist</h2><button class="icon-btn" type="button" data-close-dialog="playlistDialog" aria-label="Close"><svg><use href="#i-x"/></svg></button></div><label class="modal-label" for="playlistNameInput">Name</label><input id="playlistNameInput" maxlength="60" required placeholder="Playlist name"><div class="modal-actions"><button type="button" class="btn btn-quiet" data-close-dialog="playlistDialog">Cancel</button><button type="submit" class="btn btn-primary">Save</button></div></form></dialog>
   <dialog id="trackDialog" class="modal"><div class="modal-top"><h2 id="trackDialogTitle">Song options</h2><button class="icon-btn" type="button" data-close-dialog="trackDialog" aria-label="Close"><svg><use href="#i-x"/></svg></button></div><div id="trackDialogBody" class="dialog-options"></div></dialog>
   <dialog id="editTrackDialog" class="modal edit-modal"><form id="editTrackForm"><div class="modal-top"><h2>Edit song info</h2><button class="icon-btn" type="button" data-close-dialog="editTrackDialog" aria-label="Close"><svg><use href="#i-x"/></svg></button></div><input type="hidden" id="editTrackId"><label class="modal-label" for="editTitle">Title<input id="editTitle" required maxlength="250" autocomplete="off"></label><label class="modal-label" for="editArtist">Artist<input id="editArtist" maxlength="250" autocomplete="off"></label><label class="modal-label" for="editAlbum">Album<input id="editAlbum" maxlength="250" autocomplete="off"></label><div class="edit-grid"><label class="modal-label" for="editTrackNumber">Track no.<input id="editTrackNumber" maxlength="24" autocomplete="off"></label><label class="modal-label" for="editYear">Year<input id="editYear" maxlength="24" autocomplete="off"></label></div><label class="modal-label" for="editGenre">Genre<input id="editGenre" maxlength="120" autocomplete="off"></label><p class="modal-note">Changes are saved to this library only. Your original music files are never edited.</p><div class="modal-actions"><button class="btn btn-quiet" type="button" data-close-dialog="editTrackDialog">Cancel</button><button class="btn btn-primary" type="submit">Save changes</button></div></form></dialog>
-  <dialog id="settingsDialog" class="modal"><div class="modal-top"><h2>Settings</h2><button class="icon-btn" type="button" data-close-dialog="settingsDialog" aria-label="Close"><svg><use href="#i-x"/></svg></button></div><p class="modal-description">Music Player links to original files by default. Supported desktop browsers can remember file access; other browsers may need you to reconnect songs after reopening.</p><label class="offline-setting"><input id="offlineModeToggle" type="checkbox"><span><strong>Keep newly added music offline</strong><small>Optional local audio copies, useful on iPhone. Uses browser storage and may be removed by your browser.</small></span></label><div class="storage-row"><strong>Library</strong><span id="storageValue">—</span></div><p class="modal-description" id="storageWarning">Clearing browser data removes your catalog and playlists, not your original music.</p><div class="settings-buttons"><button class="btn btn-quiet" id="downloadOfflineBtn"><svg><use href="#i-download"/></svg> Download offline copy</button><button class="btn btn-quiet" id="clearOfflineBtn">Remove offline copies</button><button class="btn btn-danger" id="clearLibraryBtn">Clear library</button></div></dialog>
+  <dialog id="settingsDialog" class="modal"><div class="modal-top"><h2>Settings</h2><button class="icon-btn" type="button" data-close-dialog="settingsDialog" aria-label="Close"><svg><use href="#i-x"/></svg></button></div><p class="modal-description">Music Player links to original files by default. Supported desktop browsers can remember file access; other browsers may need you to reconnect songs after reopening.</p><label class="offline-setting"><input id="offlineModeToggle" type="checkbox"><span><strong>Keep newly added music offline</strong><small>Optional local audio copies, useful on iPhone. Uses browser storage and may be removed by your browser.</small></span></label><div class="storage-row"><strong>Library</strong><span id="storageValue">—</span></div><p class="modal-description" id="storageWarning">Clearing browser data removes your catalog and playlists, not your original music.</p><div class="settings-buttons"><button class="btn btn-quiet" id="downloadOfflineBtn"><svg><use href="#i-download"/></svg> Download offline copy</button><button class="btn btn-quiet" id="manageStorageBtn">Manage offline storage</button><button class="btn btn-danger" id="clearLibraryBtn">Clear library</button></div></dialog>
+  <dialog id="storageDialog" class="modal wide-modal">
+    <div class="modal-top"><h2>Storage manager</h2><button class="icon-btn" type="button" data-close-dialog="storageDialog" aria-label="Close"><svg><use href="#i-x"/></svg></button></div>
+    <p class="modal-description">Choose offline copies to remove. Your original music and playlists stay untouched. This manages only this device's browser storage.</p>
+    <div class="manager-stats"><strong id="storageManagerTotals">—</strong><span id="storageQuotaText">Checking browser storage…</span></div>
+    <div class="manager-controls"><label><span>Group by</span><select id="storageGroup"><option value="song">Songs</option><option value="album">Albums</option><option value="playlist">Playlists</option></select></label><label><span>Find</span><input id="storageSearch" type="search" placeholder="Search offline copies"></label></div>
+    <div class="manager-actions"><span id="storageSelectionText">0 selected</span><button class="btn btn-quiet" id="storageSelectShownBtn" type="button">Select shown</button><button class="btn btn-quiet" id="storageClearSelectionBtn" type="button">Clear</button></div>
+    <div id="storageEntryList" class="manager-list" role="group" aria-label="Stored music groups"></div>
+    <button id="storageMoreBtn" class="more-tracks" type="button" hidden>Show more</button>
+    <div class="manager-notice" id="storageLegacyNotice" hidden></div>
+    <div class="modal-actions"><button class="btn btn-quiet" type="button" data-close-dialog="storageDialog">Close</button><button class="btn btn-danger" id="storageRemoveBtn" type="button" disabled>Remove selected copies</button></div>
+  </dialog>
+  <dialog id="relinkDialog" class="modal wide-modal">
+    <div class="modal-top"><h2>Library relink</h2><button class="icon-btn" type="button" data-close-dialog="relinkDialog" aria-label="Close"><svg><use href="#i-x"/></svg></button></div>
+    <p class="modal-description">Moved or renamed originals? Choose their new folder or files. Music Player suggests matches without changing your playlists, favorites or edited song details. Review matches before applying.</p>
+    <div class="manager-actions relink-actions"><button class="btn btn-quiet" id="relinkPickFolderBtn" type="button"><svg><use href="#i-folder"/></svg> Choose folder</button><button class="btn btn-quiet" id="relinkPickFilesBtn" type="button"><svg><use href="#i-plus"/></svg> Choose files</button><button class="btn btn-quiet" id="relinkStopBtn" type="button" hidden>Stop</button></div>
+    <progress id="relinkProgress" class="manager-progress" value="0" max="1" hidden></progress>
+    <p id="relinkSummary" class="manager-notice" aria-live="polite">Or use a song's ••• menu → Relink file to reconnect it individually.</p>
+    <div id="relinkMatchList" class="manager-list" role="group" aria-label="Suggested song matches"></div>
+    <button id="relinkMoreBtn" class="more-tracks" type="button" hidden>Show more</button>
+    <div class="modal-actions"><button class="btn btn-quiet" type="button" data-close-dialog="relinkDialog">Close</button><button class="btn btn-primary" id="relinkApplyBtn" type="button" disabled>Apply reviewed matches</button></div>
+  </dialog>
   <dialog id="installDialog" class="modal"><div class="modal-top"><h2>Install Music Player</h2><button class="icon-btn" type="button" data-close-dialog="installDialog" aria-label="Close"><svg><use href="#i-x"/></svg></button></div><p class="modal-description" id="installInstructions">Install this app from your browser menu, then use it offline.</p><div class="modal-actions"><button class="btn btn-primary" type="button" data-close-dialog="installDialog">Got it</button></div></dialog>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 </body>

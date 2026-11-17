@@ -4,7 +4,7 @@
 
 - [ ] Load the HTTPS GitHub Pages deployment; confirm the official Buildiful® logo, favicon, privacy link, copyright, and correct version.
 - [ ] Upgrade an existing catalog from v1.0.x / v1.1.x. Verify song details, playlists, favorites, and previously stored copies remain available.
-- [ ] Verify the service worker takes over and the interface opens offline after one successful online load.
+- [ ] Verify the service worker upgrades its cache to v1.3.0 and the interface opens offline after one successful online load.
 - [ ] In Chrome/Edge, install as a desktop PWA; import from original folder, close and reopen, and check permissions/reconnection.
 - [ ] On iPhone Safari, Add to Home Screen; separately test importing in that installed app and reopening offline.
 
@@ -16,6 +16,18 @@
 - [ ] Verify multi-select, nested folder import where supported, drag/drop, re-adding the same tracks, searching, sorting and Show more with 150+ songs.
 - [ ] On an unsupported file picker, confirm temporary links reconnect by matching filename, size, and modified time after reselecting files.
 - [ ] With quota near full, confirm the import reports failures and existing songs remain unaffected.
+
+## Library relink and Storage manager
+
+- [ ] Take a backup of your working library (or test in a fresh browser profile) before migrating an important catalog; test v1.2.0 → v1.3.0 without resetting IndexedDB.
+- [ ] Import originals, manually edit title and artist, mark as favorite, add to a playlist; move/rename originals and relink using the new file/folder selection. Confirm song ID, edits, favorite, and playlist membership remain.
+- [ ] Test relinking on an existing v1.2.0 catalog without audio signatures: unchanged-size and modification-date matches; if unresolved, manually select the correct file.
+- [ ] Test a folder containing several identically-sized audio files; ambiguous matches must require review and never link automatically without confirmation. Confirm one original is not linked to multiple catalog tracks in the same batch.
+- [ ] Test no matches and cancelled scans: catalog entries must not be modified. Test browser permission denial and removable drives going offline.
+- [ ] In Storage manager, group by song, album and playlist; select/deselect, search and paginate with hundreds of offline songs. A track in two playlists must not be counted twice when deleting selected copies.
+- [ ] Remove some but not all offline copies; ensure retained ones remain playable, and neither original audio files nor playlists are modified. Verify counts after reload.
+- [ ] Confirm old v1.0 legacy copies are reported separately, are not silently deleted, and become individually removable only after a reference is re-established or an offline copy exists.
+- [ ] Confirm browser-estimated usage/quota is clearly labelled as approximate, not guaranteed free space.
 
 ## Song metadata and offline choices
 
@@ -31,10 +43,11 @@
 
 - [ ] Play/pause/stop/next/previous, seek, repeat, shuffle, volume, background/lock-screen controls where supported.
 - [ ] Create, rename and delete playlists; favorite/unfavorite songs; ensure removing a catalog entry never deletes the original file.
-- [ ] Confirm no audio request, file path, name, playlist name, song title or listening history reaches any external service.
+- [ ] Confirm no audio request, file path, name, playlist name, song title, relink information or listening history reaches any external service.
 - [ ] Decline GA: no GA script or requests. Allow GA: only sanitized action types, counts and platform categories. Withdraw consent and confirm requests stop after reload.
+- [ ] Check `mobile-web-app-capable` meta, and that a custom Install click calls the prompt when available without unconditionally suppressing the browser native banner.
 - [ ] Download the offline ZIP and confirm it opens with `file://` without assets missing; note that no service worker or persistent handles are available.
-- [ ] Check mobile widths (320–430px), desktop widths, keyboard navigation, labels, dialogs and import status aria-live.
+- [ ] Check mobile widths (320–430px), desktop widths, keyboard navigation, labels, dialogs, Storage Manager, Library relink and import status aria-live.
 
 ## Publishing
 

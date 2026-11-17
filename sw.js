@@ -1,5 +1,5 @@
 /* App shell only: audio imports and opt-in offline audio live outside the service worker cache. */
-const CACHE = 'music-player-shell-v1-2-0';
+const CACHE = 'music-player-shell-v1-3-0';
 const PREFIX = 'music-player-shell-';
 const APP_FILES = [
   './', './index.html', './styles.css', './app.js',
